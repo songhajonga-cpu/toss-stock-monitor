@@ -45,6 +45,9 @@ async def get_access_token() -> str:
         )
 
     async with httpx.AsyncClient(timeout=15.0) as client:
+        # Toss docs show form-urlencoded client credentials. Some OAuth2 clients
+        # advertise credentials in the Authorization header, so retry with
+        # HTTP Basic only when the official form-body request is rejected.
         response = await client.post(
             TOKEN_URL,
             data={
@@ -58,11 +61,31 @@ async def get_access_token() -> str:
             },
         )
 
+        if response.status_code == 401:
+            response = await client.post(
+                TOKEN_URL,
+                data={"grant_type": "client_credentials"},
+                auth=httpx.BasicAuth(client_id, client_secret),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+
     if response.is_error:
-        raise HTTPException(
-            status_code=502,
-            detail=f"토스증권 액세스 토큰 발급 실패: HTTP {response.status_code}",
-        )
+        detail = f"토스증권 액세스 토큰 발급 실패: HTTP {response.status_code}"
+        try:
+            payload = response.json()
+            oauth_error = payload.get("error")
+            oauth_description = payload.get("error_description")
+            if oauth_error:
+                detail += f" ({oauth_error}"
+                if oauth_description:
+                    detail += f": {oauth_description}"
+                detail += ")"
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=detail)
 
     data = response.json()
     token: Optional[str] = data.get("access_token") or data.get("accessToken")
