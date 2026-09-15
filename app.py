@@ -47,9 +47,15 @@ async def get_access_token() -> str:
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(
             TOKEN_URL,
-            data={"grant_type": "client_credentials"},
-            auth=httpx.BasicAuth(client_id, client_secret),
-            headers={"Accept": "application/json"},
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
         )
 
     if response.is_error:
