@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Toss Stock Monitor</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0b1020; color: #f3f4f6; }
+    main { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    .sub { color: #9ca3af; font-size: 14px; margin-bottom: 18px; }
+    .panel { background: #151b2f; border: 1px solid #252d46; border-radius: 18px; padding: 14px; margin-bottom: 14px; }
+    textarea { width: 100%; min-height: 86px; resize: vertical; border: 1px solid #39425f; border-radius: 12px; padding: 12px; background: #0f1528; color: #fff; font-size: 16px; }
+    button { width: 100%; border: 0; border-radius: 12px; padding: 13px; margin-top: 10px; font-weight: 700; font-size: 16px; background: #3182f6; color: white; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 14px 2px; border-bottom: 1px solid #252d46; }
+    .row:last-child { border-bottom: 0; }
+    .name { font-weight: 750; font-size: 17px; }
+    .symbol, .time, .status { color: #9ca3af; font-size: 12px; margin-top: 4px; }
+    .price { font-size: 20px; font-weight: 800; text-align: right; }
+    .error { color: #fca5a5; white-space: pre-wrap; font-size: 14px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .badge { padding: 5px 9px; border-radius: 999px; background: #25304d; font-size: 12px; color: #c7d2fe; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>주식 실시간 모니터</h1>
+  <div class="sub">토스증권 Open API · 5초 자동 새로고침</div>
+
+  <section class="panel">
+    <div class="toolbar">
+      <strong>관심종목</strong>
+      <span class="badge" id="state">대기</span>
+    </div>
+    <textarea id="watchlist" spellcheck="false" placeholder="예:&#10;000660=SK하이닉스&#10;005930=삼성전자&#10;AAPL=Apple"></textarea>
+    <button id="save">저장하고 조회</button>
+    <div class="status">한 줄에 하나씩 입력. 형식: 종목코드=표시이름</div>
+  </section>
+
+  <section class="panel" id="prices">
+    <div class="status">관심종목을 저장하면 시세가 표시됩니다.</div>
+  </section>
+
+  <section class="panel error" id="error" hidden></section>
+</main>
+
+<script>
+const watch = document.getElementById('watchlist');
+const pricesEl = document.getElementById('prices');
+const errorEl = document.getElementById('error');
+const stateEl = document.getElementById('state');
+const saveBtn = document.getElementById('save');
+
+const DEFAULT = '000660=SK하이닉스\n005930=삼성전자';
+watch.value = localStorage.getItem('watchlist') || DEFAULT;
+
+function parseWatchlist() {
+  return watch.value
+    .split(/[\n,]+/)
+    .map(v => v.trim())
+    .filter(Boolean)
+    .map(v => {
+      const [symbol, ...rest] = v.split('=');
+      return { symbol: symbol.trim().toUpperCase(), name: rest.join('=').trim() || symbol.trim().toUpperCase() };
+    });
+}
+
+function fmtPrice(value, currency) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value ?? '-');
+  const decimals = currency === 'KRW' ? 0 : 2;
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: decimals }).format(n) + (currency ? ' ' + currency : '');
+}
+
+async function refresh() {
+  const items = parseWatchlist();
+  if (!items.length) return;
+
+  stateEl.textContent = '조회 중';
+  errorEl.hidden = true;
+
+  try {
+    const symbols = items.map(x => x.symbol).join(',');
+    const res = await fetch('/api/prices?symbols=' + encodeURIComponent(symbols), { cache: 'no-store' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || '조회 실패');
+
+    const rows = Array.isArray(body.result) ? body.result : [];
+    const map = new Map(rows.map(x => [String(x.symbol).toUpperCase(), x]));
+
+    pricesEl.innerHTML = items.map(item => {
+      const p = map.get(item.symbol);
+      if (!p) {
+        return '<div class="row"><div><div class="name">' + item.name + '</div><div class="symbol">' + item.symbol + '</div></div><div class="price">-</div></div>';
+      }
+      return '<div class="row">' +
+        '<div><div class="name">' + item.name + '</div><div class="symbol">' + item.symbol + '</div><div class="time">' + (p.timestamp || '') + '</div></div>' +
+        '<div class="price">' + fmtPrice(p.lastPrice, p.currency) + '</div>' +
+        '</div>';
+    }).join('');
+
+    stateEl.textContent = '정상';
+  } catch (e) {
+    stateEl.textContent = '오류';
+    errorEl.hidden = false;
+    errorEl.textContent = String(e.message || e);
+  }
+}
+
+saveBtn.addEventListener('click', () => {
+  localStorage.setItem('watchlist', watch.value);
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
